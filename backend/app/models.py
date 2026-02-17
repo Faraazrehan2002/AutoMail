@@ -18,7 +18,8 @@ class Job(Base):
     file_path = Column(String, nullable=False)
     status = Column(String, default="processing")  # processing, completed, failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    last_batch_id = Column(String, nullable=True)  # Track last batch sent
     
     # Relationships
     recipients = relationship("Recipient", back_populates="job", cascade="all, delete-orphan")
@@ -46,12 +47,13 @@ class SendLog(Base):
     batch_id = Column(String, nullable=False, index=True)  # UUID for batch tracking
     job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
     recipient_email = Column(String, nullable=False, index=True)
-    status = Column(String, nullable=False)  # queued, sent, failed
+    status = Column(String, nullable=False, default="queued")  # queued, sending, sent, failed
     error_message = Column(Text, nullable=True)
     sendgrid_message_id = Column(String, nullable=True)
-    sent_at = Column(DateTime(timezone=True), server_default=func.now())
+    sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     personalization = Column(JSON, nullable=True)  # Store personalization data
+    progress_index = Column(Integer, nullable=True)  # Optional: track order in batch
     
     # Relationships
     job = relationship("Job", back_populates="send_logs")

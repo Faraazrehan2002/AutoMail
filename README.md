@@ -70,25 +70,44 @@ alembic upgrade head
 python scripts/db_check.py
 ```
 
-### 4. Run Development Servers
+### 4. Start Redis (Required for Background Jobs)
 
-**Run in separate terminals (recommended):**
+**Option A: Using Docker (Recommended)**
+```bash
+docker-compose up -d redis
+```
+
+**Option B: Local Redis**
+```bash
+# Install Redis (macOS: brew install redis, Ubuntu: apt-get install redis-server)
+redis-server
+```
+
+### 5. Run Development Servers
+
+**Run in separate terminals:**
 
 ```bash
-# Terminal 1: Backend
+# Terminal 1: Backend API
 cd backend
 uvicorn app.main:app --reload
 
-# Terminal 2: Frontend
+# Terminal 2: Background Worker (Required for email sending)
+cd backend
+python worker.py
+
+# Terminal 3: Frontend
 cd web
 npm run dev
 ```
 
 This starts:
 - Backend API: http://localhost:8000
+- Background Worker: Processing email jobs from queue
 - Next.js app: http://localhost:3000
+- Redis: localhost:6379
 
-**Alternative**: If you have `concurrently` installed, you can use `npm run dev` from root directory.
+**Note**: The worker must be running for emails to be sent. The API will queue jobs, but emails won't send without a worker.
 
 ## Features
 
@@ -109,8 +128,11 @@ This starts:
 - `POST /upload` - Upload PDF and extract emails
 - `GET /jobs` - List jobs (paginated)
 - `GET /jobs/{job_id}` - Get job details
-- `POST /jobs/{job_id}/send` - Send emails
+- `POST /jobs/{job_id}/send` - Queue emails for background sending (returns immediately)
 - `GET /jobs/{job_id}/batches/{batch_id}` - Get batch status
+- `GET /jobs/{job_id}/batches/{batch_id}/progress` - Get batch progress (for polling)
+- `DELETE /jobs/{job_id}` - Delete a job
+- `DELETE /jobs` - Delete all jobs
 - `GET /health` - Health check
 
 ## API Proxy Layer
@@ -135,6 +157,7 @@ DATABASE_URL=sqlite:///./automail.db
 EMAILS_PER_SECOND=1.0
 APP_API_KEY=your_secret_key
 ALLOWED_ORIGINS=http://localhost:3000
+REDIS_URL=redis://localhost:6379/0
 ```
 
 ### Web (`web/.env`)

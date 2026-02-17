@@ -1,0 +1,175 @@
+"""
+Background worker tasks for sending emails
+"""
+import time
+import logging
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from ..db import SessionLocal
+from ..models import SendLog, Job
+from ..config import settings
+from .sendgrid_client import SendGridClient
+
+logger = logging.getLogger(__name__)
+
+
+def send_batch_emails(
+    batch_id: str,
+    job_id: str,
+    recipients: List[str],
+    subject: str,
+    html_body: str,
+    personalization_map: Optional[Dict[str, Dict[str, Any]]] = None,
+    dry_run: bool = False
+):
+    """
+    Background task to send emails to a batch of recipients.
+    
+    This function runs in a worker process and processes emails sequentially
+    with rate limiting, updating the database as it goes.
+    
+    Args:
+        batch_id: Batch ID for tracking
+        job_id: Job ID
+        recipients: List of recipient email addresses
+        subject: Email subject
+        html_body: Email HTML body
+        personalization_map: Optional dict mapping email -> personalization data
+        dry_run: If True, validate but don't actually send
+    """
+    db: Session = SessionLocal()
+    rate_limit_delay = 1.0 / settings.emails_per_second
+    
+    try:
+        logger.info(f"Starting batch {batch_id} for job {job_id} with {len(recipients)} recipients")
+        
+        # Initialize SendGrid client if not dry run
+        sendgrid_client = None
+        if not dry_run:
+            try:
+                sendgrid_client = SendGridClient()
+            except ValueError as e:
+                logger.error(f"SendGrid not configured: {e}")
+                # Mark all as failed
+                for i, recipient_email in enumerate(recipients):
+                    log_entry = db.query(SendLog).filter(
+                        SendLog.batch_id == batch_id,
+                        SendLog.recipient_email == recipient_email
+                    ).first()
+                    if log_entry:
+                        log_entry.status = "failed"
+                        log_entry.error_message = f"SendGrid not configured: {e}"
+                        log_entry.sent_at = datetime.utcnow()
+                        log_entry.progress_index = i
+                db.commit()
+                return
+        
+        # Process each recipient
+        for i, recipient_email in enumerate(recipients):
+            try:
+                # Get log entry
+                log_entry = db.query(SendLog).filter(
+                    SendLog.batch_id == batch_id,
+                    SendLog.recipient_email == recipient_email
+                ).first()
+                
+                if not log_entry:
+                    logger.warning(f"Log entry not found for {recipient_email} in batch {batch_id}")
+                    continue
+                
+                # Update status to "sending"
+                log_entry.status = "sending"
+                log_entry.progress_index = i
+                db.commit()
+                
+                # Get personalization for this recipient
+                personalization = None
+                if personalization_map and recipient_email in personalization_map:
+                    personalization = personalization_map[recipient_email]
+                
+                # Send email (or simulate in dry_run mode)
+                if dry_run:
+                    # In dry run, just mark as sent
+                    log_entry.status = "sent"
+                    log_entry.sendgrid_message_id = f"DRY_RUN_{batch_id}"
+                    log_entry.sent_at = datetime.utcnow()
+                    db.commit()
+                    logger.info(f"[DRY RUN] Would send to {recipient_email}")
+                else:
+                    # Actually send email
+                    try:
+                        message_id = sendgrid_client.send_email(
+                            recipient_email,
+                            subject,
+                            html_body,
+                            personalization
+                        )
+                        
+                        # Update log entry
+                        log_entry.status = "sent"
+                        log_entry.sendgrid_message_id = message_id
+                        log_entry.sent_at = datetime.utcnow()
+                        db.commit()
+                        logger.info(f"Sent email to {recipient_email} (message_id: {message_id})")
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.error(f"Failed to send email to {recipient_email}: {error_msg}")
+                        
+                        # Update log entry
+                        log_entry.status = "failed"
+                        log_entry.error_message = error_msg
+                        log_entry.sent_at = datetime.utcnow()
+                        db.commit()
+                
+                # Rate limiting: wait before next send
+                if i < len(recipients) - 1:  # Don't wait after last email
+                    time.sleep(rate_limit_delay)
+                    
+            except Exception as e:
+                logger.error(f"Error processing recipient {recipient_email}: {e}")
+                # Try to update log entry
+                try:
+                    log_entry = db.query(SendLog).filter(
+                        SendLog.batch_id == batch_id,
+                        SendLog.recipient_email == recipient_email
+                    ).first()
+                    if log_entry:
+                        log_entry.status = "failed"
+                        log_entry.error_message = f"Processing error: {str(e)}"
+                        log_entry.sent_at = datetime.utcnow()
+                        db.commit()
+                except Exception as db_error:
+                    logger.error(f"Failed to update log entry: {db_error}")
+                continue
+        
+        # Update job's last_batch_id and updated_at
+        try:
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.last_batch_id = batch_id
+                job.updated_at = datetime.utcnow()
+                db.commit()
+        except Exception as e:
+            logger.error(f"Failed to update job: {e}")
+        
+        logger.info(f"Completed batch {batch_id} for job {job_id}")
+        
+    except Exception as e:
+        logger.error(f"Fatal error in batch {batch_id}: {e}", exc_info=True)
+        # Mark remaining queued recipients as failed
+        try:
+            queued_logs = db.query(SendLog).filter(
+                SendLog.batch_id == batch_id,
+                SendLog.status == "queued"
+            ).all()
+            for log_entry in queued_logs:
+                log_entry.status = "failed"
+                log_entry.error_message = f"Batch processing error: {str(e)}"
+                log_entry.sent_at = datetime.utcnow()
+            db.commit()
+        except Exception as db_error:
+            logger.error(f"Failed to update failed logs: {db_error}")
+    finally:
+        db.close()

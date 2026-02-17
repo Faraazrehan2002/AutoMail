@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: str = "*"  # Comma-separated list, or "*" for all
     
+    # Redis (for job queue)
+    redis_url: str = "redis://localhost:6379/0"
+    
     # Development
     auto_migrate_dev: bool = False  # Auto-run migrations in dev (set AUTO_MIGRATE_DEV=true)
 

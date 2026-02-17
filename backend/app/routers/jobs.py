@@ -1,7 +1,7 @@
 import os
 import shutil
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from typing import List
 import logging
@@ -23,6 +23,8 @@ from ..config import settings
 from ..services.pdf_extract import extract_text_from_pdf
 from ..services.email_extract import extract_emails_from_text
 from ..services.mailer import Mailer
+from ..services.queue import get_email_queue
+from ..services.worker_tasks import send_batch_emails
 
 logger = logging.getLogger(__name__)
 
@@ -197,14 +199,14 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):
 async def send_emails(
     job_id: str,
     send_request: SendRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
-    Send emails to selected recipients.
+    Queue emails for background sending.
     
-    Validates that recipients exist in the job, then sends emails
-    with rate limiting. Supports dry_run mode for testing.
+    Validates that recipients exist in the job, creates send_log entries,
+    and enqueues a background task to send emails. Returns immediately with
+    batch_id and queued status.
     """
     # Verify job exists
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -233,39 +235,67 @@ async def send_emails(
             for email in send_request.recipients
         }
     
-    # Send emails (this will run synchronously but with rate limiting)
-    mailer = get_mailer()
-    result = await mailer.send_batch(
-        db=db,
-        batch_id=batch_id,
-        job_id=job_id,
-        recipients=list(requested_emails),
-        subject=send_request.subject,
-        html_body=send_request.html_body,
-        personalization_map=personalization_map,
-        dry_run=send_request.dry_run
-    )
-    
-    # Format response
-    send_statuses = [
-        SendStatus(
-            email=r["email"],
-            status=r["status"],
-            error_message=r.get("error_message"),
-            sendgrid_message_id=r.get("sendgrid_message_id")
+    # Create send_log entries with "queued" status
+    send_statuses = []
+    for recipient_email in requested_emails:
+        personalization_data = None
+        if personalization_map:
+            personalization_data = personalization_map.get(recipient_email)
+        
+        log_entry = SendLog(
+            batch_id=batch_id,
+            job_id=job_id,
+            recipient_email=recipient_email,
+            status="queued",
+            personalization=personalization_data
         )
-        for r in result["results"]
-    ]
+        db.add(log_entry)
+        send_statuses.append(SendStatus(
+            email=recipient_email,
+            status="queued",
+            error_message=None,
+            sendgrid_message_id=None
+        ))
     
+    db.commit()
+    
+    # Enqueue background task
+    try:
+        queue = get_email_queue()
+        queue.enqueue(
+            send_batch_emails,
+            batch_id=batch_id,
+            job_id=job_id,
+            recipients=list(requested_emails),
+            subject=send_request.subject,
+            html_body=send_request.html_body,
+            personalization_map=personalization_map,
+            dry_run=send_request.dry_run,
+            job_timeout='30m'  # Allow up to 30 minutes for large batches
+        )
+        logger.info(f"Enqueued batch {batch_id} for job {job_id} with {len(requested_emails)} recipients")
+    except Exception as e:
+        logger.error(f"Failed to enqueue batch {batch_id}: {e}")
+        # Mark all as failed
+        for log_entry in db.query(SendLog).filter(SendLog.batch_id == batch_id).all():
+            log_entry.status = "failed"
+            log_entry.error_message = f"Failed to enqueue: {str(e)}"
+        db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue emails: {str(e)}"
+        )
+    
+    # Return immediate response
     return SendResponse(
         job_id=job_id,
         batch_id=batch_id,
-        total_recipients=result["total_recipients"],
-        queued=result["queued"],
-        sent=result["sent"],
-        failed=result["failed"],
+        total_recipients=len(requested_emails),
+        queued=len(requested_emails),
+        sent=0,
+        failed=0,
         results=send_statuses,
-        dry_run=result.get("dry_run", False)
+        dry_run=send_request.dry_run
     )
 
 
@@ -293,6 +323,7 @@ async def get_batch_status(
     # Aggregate results
     total = len(send_logs)
     queued = sum(1 for log in send_logs if log.status == "queued")
+    sending = sum(1 for log in send_logs if log.status == "sending")
     sent = sum(1 for log in send_logs if log.status == "sent")
     failed = sum(1 for log in send_logs if log.status == "failed")
     
@@ -314,12 +345,61 @@ async def get_batch_status(
         batch_id=batch_id,
         job_id=job_id,
         total_recipients=total,
-        queued=queued,
+        queued=queued + sending,  # Include "sending" in queued for backward compatibility
         sent=sent,
         failed=failed,
         created_at=created_at,
         results=results
     )
+
+
+@router.get("/jobs/{job_id}/batches/{batch_id}/progress")
+async def get_batch_progress(
+    job_id: str,
+    batch_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get batch progress information for polling"""
+    # Verify job exists
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Get all send logs for this batch
+    send_logs = db.query(SendLog).filter(
+        SendLog.batch_id == batch_id,
+        SendLog.job_id == job_id
+    ).all()
+    
+    if not send_logs:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    
+    # Aggregate results
+    total = len(send_logs)
+    queued = sum(1 for log in send_logs if log.status == "queued")
+    sending = sum(1 for log in send_logs if log.status == "sending")
+    sent = sum(1 for log in send_logs if log.status == "sent")
+    failed = sum(1 for log in send_logs if log.status == "failed")
+    
+    # Calculate progress
+    completed = sent + failed
+    remaining = queued + sending
+    percent_complete = (completed / total * 100) if total > 0 else 0
+    
+    # Determine overall status
+    if queued > 0 or sending > 0:
+        status = "processing" if sending > 0 else "queued"
+    else:
+        status = "completed"
+    
+    return {
+        "total": total,
+        "sent": sent,
+        "failed": failed,
+        "remaining": remaining,
+        "percent_complete": round(percent_complete, 2),
+        "status": status
+    }
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
