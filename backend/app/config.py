@@ -10,9 +10,9 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    # SendGrid Configuration
-    sendgrid_api_key: str
-    from_email: str
+    # SendGrid Configuration (optional for development)
+    sendgrid_api_key: Optional[str] = None
+    from_email: Optional[str] = None
     
     # Database
     database_url: str = "sqlite:///./automail.db"

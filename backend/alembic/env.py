@@ -5,8 +5,9 @@ from alembic import context
 import os
 import sys
 
-# Add the app directory to the path
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Add the backend directory to the path
+backend_dir = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, backend_dir)
 
 # Import your models and config
 from app.db import Base

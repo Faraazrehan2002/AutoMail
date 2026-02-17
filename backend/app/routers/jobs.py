@@ -11,12 +11,14 @@ from ..models import Job, Recipient, SendLog
 from ..schemas import (
     JobResponse,
     JobDetailResponse,
+    JobListResponse,
     SendRequest,
     SendResponse,
     RecipientPreview,
     BatchStatus,
     SendStatus
 )
+from fastapi import Query
 from ..config import settings
 from ..services.pdf_extract import extract_text_from_pdf
 from ..services.email_extract import extract_emails_from_text
@@ -121,6 +123,43 @@ async def upload_pdf(
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+
+
+@router.get("/jobs", response_model=JobListResponse)
+async def list_jobs(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db)
+):
+    """List recent jobs with pagination"""
+    skip = (page - 1) * page_size
+    
+    # Get total count
+    total = db.query(Job).count()
+    
+    # Get jobs ordered by created_at descending
+    jobs = db.query(Job).order_by(Job.created_at.desc()).offset(skip).limit(page_size).all()
+    
+    # Get recipient counts for each job
+    job_responses = []
+    for job in jobs:
+        recipient_count = db.query(Recipient).filter(Recipient.job_id == job.id).count()
+        job_responses.append(JobResponse(
+            id=job.id,
+            filename=job.filename,
+            file_path=job.file_path,
+            status=job.status,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            recipient_count=recipient_count
+        ))
+    
+    return JobListResponse(
+        jobs=job_responses,
+        total=total,
+        page=page,
+        page_size=page_size
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)

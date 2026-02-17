@@ -15,8 +15,16 @@ class Mailer:
     """Service for sending emails with rate limiting"""
     
     def __init__(self):
-        self.sendgrid_client = SendGridClient()
+        # Initialize SendGrid client only when needed (lazy initialization)
+        self._sendgrid_client = None
         self.rate_limit_delay = 1.0 / settings.emails_per_second
+    
+    @property
+    def sendgrid_client(self):
+        """Lazy initialization of SendGrid client"""
+        if self._sendgrid_client is None:
+            self._sendgrid_client = SendGridClient()
+        return self._sendgrid_client
     
     async def send_batch(
         self,

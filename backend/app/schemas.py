@@ -27,6 +27,13 @@ class JobResponse(BaseModel):
         from_attributes = True
 
 
+class JobListResponse(BaseModel):
+    jobs: List[JobResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class JobDetailResponse(JobResponse):
     recipients: List[RecipientPreview] = []
 
