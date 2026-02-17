@@ -2,11 +2,23 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import { motion } from 'framer-motion'
+import { Search, Filter, CheckCircle2, XCircle, Clock, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react'
 import { getJob, sendEmails, getBatchStatus, type JobDetail, type SendResponse, type BatchStatus } from '@/src/lib/api'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useToast } from '@/hooks/use-toast'
+import { PieChartWrapper } from '@/components/charts/pie-chart-wrapper'
 
 export default function JobDetailPage() {
   const router = useRouter()
   const params = useParams()
+  const { toast } = useToast()
   const jobId = params.jobId as string
 
   const [job, setJob] = useState<JobDetail | null>(null)
@@ -38,7 +50,11 @@ export default function JobDetailPage() {
       setJob(data)
     } catch (error: any) {
       console.error('Failed to load job:', error)
-      alert(error.message)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load job",
+        variant: "destructive",
+      })
       router.push('/')
     } finally {
       setLoading(false)
@@ -100,12 +116,20 @@ export default function JobDetailPage() {
 
   async function handleSend() {
     if (!subject.trim() || !body.trim()) {
-      alert('Please enter subject and body')
+      toast({
+        title: "Validation Error",
+        description: "Please enter subject and body",
+        variant: "destructive",
+      })
       return
     }
 
     if (selectedRecipients.size === 0) {
-      alert('Please select at least one recipient')
+      toast({
+        title: "Validation Error",
+        description: "Please select at least one recipient",
+        variant: "destructive",
+      })
       return
     }
 
@@ -118,11 +142,18 @@ export default function JobDetailPage() {
         dry_run: dryRun,
       })
       setSendResult(result)
-      // Auto-load batch status
+      toast({
+        title: "Success",
+        description: dryRun ? "Dry run completed successfully" : "Emails sent successfully",
+      })
       setTimeout(() => loadBatchStatus(), 1000)
     } catch (error: any) {
       console.error('Failed to send:', error)
-      alert(error.message || 'Failed to send emails')
+      toast({
+        title: "Error",
+        description: error.message || 'Failed to send emails',
+        variant: "destructive",
+      })
     } finally {
       setSending(false)
     }
@@ -130,8 +161,12 @@ export default function JobDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">Loading...</div>
+      <div className="space-y-6">
+        <Skeleton className="h-12 w-64" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Skeleton className="h-96" />
+          <Skeleton className="h-96" />
+        </div>
       </div>
     )
   }
@@ -140,256 +175,339 @@ export default function JobDetailPage() {
     return null
   }
 
+  const chartData = batchStatus ? [
+    { name: 'Sent', value: batchStatus.sent },
+    { name: 'Failed', value: batchStatus.failed },
+    { name: 'Queued', value: batchStatus.queued },
+  ] : []
+
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push('/')}
-            className="text-blue-600 hover:text-blue-800 mb-4"
-          >
-            ← Back to Dashboard
-          </button>
-          <h1 className="text-3xl font-bold text-gray-900">{job.filename}</h1>
-          <p className="text-gray-500 mt-2">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6"
+    >
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between"
+      >
+        <div>
+          <motion.div whileHover={{ x: -4 }}>
+            <Button
+              variant="ghost"
+              onClick={() => router.push('/')}
+              className="mb-4"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </motion.div>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+            {job.filename}
+          </h1>
+          <p className="text-muted-foreground mt-2">
             {job.recipient_count} recipients • Created {new Date(job.created_at).toLocaleString()}
           </p>
         </div>
+      </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left Column: Recipients */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold mb-4">Recipients</h2>
-
-            {/* Search and Filters */}
-            <div className="mb-4 space-y-3">
-              <input
-                type="text"
-                placeholder="Search emails, names, companies..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <div className="flex gap-2">
-                <select
-                  value={domainFilter}
-                  onChange={(e) => setDomainFilter(e.target.value)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">All Domains</option>
-                  {domains.map((domain) => (
-                    <option key={domain} value={domain}>
-                      @{domain}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={selectAllFiltered}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-                >
-                  Select All
-                </button>
-                <button
-                  onClick={clearSelection}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
-                >
-                  Clear
-                </button>
-              </div>
-              <div className="text-sm text-gray-600">
-                {selectedRecipients.size} of {filteredRecipients.length} selected
-              </div>
-            </div>
-
-            {/* Recipients Table */}
-            <div className="border border-gray-200 rounded-md overflow-hidden max-h-96 overflow-y-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-12">
-                      <input
-                        type="checkbox"
-                        checked={filteredRecipients.length > 0 && filteredRecipients.every((r) => selectedRecipients.has(r.email))}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            selectAllFiltered()
-                          } else {
-                            clearSelection()
-                          }
-                        }}
-                        className="rounded border-gray-300"
-                      />
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredRecipients.map((recipient) => (
-                    <tr
-                      key={recipient.email}
-                      className={`hover:bg-gray-50 ${selectedRecipients.has(recipient.email) ? 'bg-blue-50' : ''}`}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column: Recipients */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle>Recipients</CardTitle>
+              <CardDescription>
+                Search and filter recipients
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Search and Filters */}
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search emails, names, companies..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <select
+                      value={domainFilter}
+                      onChange={(e) => setDomainFilter(e.target.value)}
+                      className="flex-1 w-full h-10 rounded-md border border-input bg-background px-3 py-2 pl-10 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <td className="px-4 py-2">
+                      <option value="">All Domains</option>
+                      {domains.map((domain) => (
+                        <option key={domain} value={domain}>
+                          @{domain}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    onClick={selectAllFiltered}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    onClick={clearSelection}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {selectedRecipients.size} of {filteredRecipients.length} selected
+                </div>
+              </div>
+
+              {/* Recipients Table */}
+              <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-border">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase w-12">
                         <input
                           type="checkbox"
-                          checked={selectedRecipients.has(recipient.email)}
-                          onChange={() => toggleRecipient(recipient.email)}
+                          checked={filteredRecipients.length > 0 && filteredRecipients.every((r) => selectedRecipients.has(r.email))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              selectAllFiltered()
+                            } else {
+                              clearSelection()
+                            }
+                          }}
                           className="rounded border-gray-300"
                         />
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-900">{recipient.email}</td>
-                      <td className="px-4 py-2 text-sm text-gray-500">{recipient.name || '-'}</td>
-                      <td className="px-4 py-2 text-sm text-gray-500">{recipient.company || '-'}</td>
+                      </th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Email</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Company</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredRecipients.length === 0 && (
-                <div className="p-8 text-center text-gray-500">No recipients match the filters</div>
-              )}
-            </div>
-          </div>
+                  </thead>
+                  <tbody className="bg-background divide-y divide-border">
+                    {filteredRecipients.map((recipient) => (
+                      <tr
+                        key={recipient.email}
+                        className={`hover:bg-muted/50 transition-colors ${selectedRecipients.has(recipient.email) ? 'bg-primary/10' : ''}`}
+                      >
+                        <td className="px-4 py-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedRecipients.has(recipient.email)}
+                            onChange={() => toggleRecipient(recipient.email)}
+                            className="rounded border-gray-300"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-sm">{recipient.email}</td>
+                        <td className="px-4 py-2 text-sm text-muted-foreground">{recipient.name || '-'}</td>
+                        <td className="px-4 py-2 text-sm text-muted-foreground">{recipient.company || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredRecipients.length === 0 && (
+                  <div className="p-8 text-center text-muted-foreground">No recipients match the filters</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-          {/* Right Column: Compose and Results */}
-          <div className="space-y-6">
-            {/* Compose Section */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Compose Email</h2>
-              <div className="space-y-4">
+        {/* Right Column: Compose and Results */}
+        <div className="space-y-6">
+          {/* Compose Section */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle>Compose Email</CardTitle>
+                <CardDescription>
+                  Write your email content
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
-                  <input
+                  <label className="block text-sm font-medium mb-2">Subject</label>
+                  <Input
                     type="text"
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
                     placeholder="Email subject"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Body (HTML)</label>
-                  <textarea
+                  <label className="block text-sm font-medium mb-2">Body (HTML)</label>
+                  <Textarea
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     placeholder="<p>Your email body here...</p>"
                     rows={8}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                    className="font-mono text-sm"
                   />
                 </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
+                <div className="flex items-center space-x-2">
+                  <Switch
                     id="dry-run"
                     checked={dryRun}
-                    onChange={(e) => setDryRun(e.target.checked)}
-                    className="rounded border-gray-300"
+                    onCheckedChange={setDryRun}
                   />
-                  <label htmlFor="dry-run" className="ml-2 text-sm text-gray-700">
+                  <label htmlFor="dry-run" className="text-sm font-medium">
                     Dry run (validate but don't send)
                   </label>
                 </div>
-                <button
+                <Button
                   onClick={handleSend}
                   disabled={sending || selectedRecipients.size === 0}
-                  className={`w-full px-4 py-2 rounded-md font-medium ${
-                    sending || selectedRecipients.size === 0
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                  }`}
+                  className="w-full"
                 >
-                  {sending ? 'Sending...' : `Send to ${selectedRecipients.size} recipient${selectedRecipients.size !== 1 ? 's' : ''}`}
-                </button>
-              </div>
-            </div>
-
-            {/* Preview Section */}
-            {body && (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4">Preview</h2>
-                <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
-                  <div className="text-sm font-medium text-gray-700 mb-2">Subject: {subject || '(no subject)'}</div>
-                  <div
-                    className="prose max-w-none"
-                    dangerouslySetInnerHTML={{ __html: body }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Results Section */}
-            {(sendResult || batchStatus) && (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold">Send Results</h2>
-                  {sendResult?.batch_id && (
-                    <button
-                      onClick={loadBatchStatus}
-                      className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-                    >
-                      Refresh
-                    </button>
+                  {sending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    `Send to ${selectedRecipients.size} recipient${selectedRecipients.size !== 1 ? 's' : ''}`
                   )}
-                </div>
-                {sendResult && (
-                  <div className="mb-4 space-y-2">
-                    <div className="text-sm">
-                      <span className="font-medium">Batch ID:</span> {sendResult.batch_id}
-                    </div>
-                    <div className="text-sm">
-                      <span className="font-medium">Status:</span>{' '}
-                      <span className="text-green-600">{sendResult.sent} sent</span>,{' '}
-                      <span className="text-red-600">{sendResult.failed} failed</span>
-                      {sendResult.dry_run && (
-                        <span className="ml-2 text-yellow-600">(Dry Run)</span>
-                      )}
-                    </div>
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* Preview Section */}
+          {body && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle>Preview</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="border rounded-lg p-4 bg-muted/30">
+                    <div className="text-sm font-medium mb-2">Subject: {subject || '(no subject)'}</div>
+                    <div
+                      className="prose max-w-none dark:prose-invert"
+                      dangerouslySetInnerHTML={{ __html: body }}
+                    />
                   </div>
-                )}
-                {batchStatus && (
-                  <div className="space-y-2">
-                    <div className="text-sm text-gray-600 mb-2">Per-recipient status:</div>
-                    <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-md">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Email</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {batchStatus.results.map((result) => (
-                            <tr key={result.email}>
-                              <td className="px-3 py-2 text-sm text-gray-900">{result.email}</td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={`px-2 py-1 text-xs rounded-full ${
-                                    result.status === 'sent'
-                                      ? 'bg-green-100 text-green-800'
-                                      : result.status === 'failed'
-                                      ? 'bg-red-100 text-red-800'
-                                      : 'bg-yellow-100 text-yellow-800'
-                                  }`}
-                                >
-                                  {result.status}
-                                </span>
-                                {result.error_message && (
-                                  <div className="text-xs text-red-600 mt-1">{result.error_message}</div>
-                                )}
-                              </td>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {/* Results Section */}
+          {(sendResult || batchStatus) && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Send Results</CardTitle>
+                    {sendResult?.batch_id && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={loadBatchStatus}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {sendResult && (
+                    <div className="space-y-2">
+                      <div className="text-sm">
+                        <span className="font-medium">Batch ID:</span> {sendResult.batch_id}
+                      </div>
+                      <div className="flex gap-4">
+                        <Badge variant="success" className="gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {sendResult.sent} sent
+                        </Badge>
+                        <Badge variant="destructive" className="gap-1">
+                          <XCircle className="h-3 w-3" />
+                          {sendResult.failed} failed
+                        </Badge>
+                        {sendResult.dry_run && (
+                          <Badge variant="secondary" className="gap-1">
+                            <Clock className="h-3 w-3" />
+                            Dry Run
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {batchStatus && chartData.length > 0 && (
+                    <div className="space-y-4">
+                      <PieChartWrapper data={chartData} height={192} />
+                      <div className="text-sm text-muted-foreground mb-2">Per-recipient status:</div>
+                      <div className="max-h-64 overflow-y-auto border rounded-lg">
+                        <table className="min-w-full divide-y divide-border">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Email</th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Status</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="bg-background divide-y divide-border">
+                            {batchStatus.results.map((result) => (
+                              <tr key={result.email} className="hover:bg-muted/50">
+                                <td className="px-3 py-2 text-sm">{result.email}</td>
+                                <td className="px-3 py-2">
+                                  <Badge
+                                    variant={
+                                      result.status === 'sent'
+                                        ? 'success'
+                                        : result.status === 'failed'
+                                        ? 'destructive'
+                                        : 'secondary'
+                                    }
+                                  >
+                                    {result.status}
+                                  </Badge>
+                                  {result.error_message && (
+                                    <div className="text-xs text-destructive mt-1">{result.error_message}</div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }

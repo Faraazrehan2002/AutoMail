@@ -320,3 +320,50 @@ async def get_batch_status(
         created_at=created_at,
         results=results
     )
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+async def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a job and all associated data"""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Delete associated file if it exists
+    if job.file_path and os.path.exists(job.file_path):
+        try:
+            os.remove(job.file_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete file {job.file_path}: {str(e)}")
+    
+    # Delete job (cascade will handle recipients and send_logs)
+    db.delete(job)
+    db.commit()
+    
+    return None
+
+
+@router.delete("/jobs", status_code=204)
+async def delete_all_jobs(
+    db: Session = Depends(get_db)
+):
+    """Delete all jobs and associated data"""
+    jobs = db.query(Job).all()
+    
+    # Delete all associated files
+    for job in jobs:
+        if job.file_path and os.path.exists(job.file_path):
+            try:
+                os.remove(job.file_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete file {job.file_path}: {str(e)}")
+    
+    # Delete all jobs (cascade will handle recipients and send_logs)
+    db.query(Job).delete()
+    db.commit()
+    
+    return None
