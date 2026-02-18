@@ -22,4 +22,5 @@ EXPOSE 8000
 
 # Default command - run migrations then start server
 # Migrations run at startup to ensure DB is ready
-CMD ["sh", "-c", "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Use PORT environment variable if set, otherwise default to 8000
+CMD sh -c "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
