@@ -17,11 +17,9 @@ COPY . .
 # Create storage directory
 RUN mkdir -p storage
 
-# Run migrations (will be skipped if using external DB)
-RUN alembic upgrade head || true
-
 # Expose port
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command - run migrations then start server
+# Migrations run at startup to ensure DB is ready
+CMD ["sh", "-c", "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
