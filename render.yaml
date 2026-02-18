@@ -1,0 +1,71 @@
+services:
+  - type: web
+    name: automail-backend
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt && alembic upgrade head
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: automail-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: automail-redis
+          type: redis
+          property: connectionString
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: APP_API_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+  - type: worker
+    name: automail-worker
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && python worker.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: automail-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: automail-redis
+          type: redis
+          property: connectionString
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+
+  - type: worker
+    name: automail-scheduler
+    env: python
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && python scheduler.py
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: automail-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: automail-redis
+          type: redis
+          property: connectionString
+
+databases:
+  - name: automail-db
+    databaseName: automail
+    user: automail
+
+  - name: automail-redis
+    type: redis
+    plan: free
