@@ -2,18 +2,22 @@
 
 ## The Problem
 
-Railway is failing with `pip: command not found` because it's not detecting Python correctly.
+Railway is detecting Node.js (from root `package.json`) instead of Python, so `pip` is not available during build.
 
 ## The Solution
 
-### Option 1: Set Root Directory in Railway (RECOMMENDED)
+### Option 1: Set Root Directory in Railway (RECOMMENDED ⭐)
+
+**This is the BEST solution - do this first!**
 
 1. **Go to each service in Railway** (backend, worker, scheduler)
 2. **Go to Settings → Source**
 3. **Set Root Directory to:** `backend`
 4. **Save and redeploy**
 
-This tells Railway to build from the `backend` folder where `requirements.txt` and `runtime.txt` are located.
+This tells Railway to build from the `backend` folder where `requirements.txt` and `runtime.txt` are located, and it won't see the root `package.json`.
+
+**Why this works:** Railway will only see Python files and won't try to install Node.js.
 
 ### Option 2: Use Dockerfile (Alternative)
 
