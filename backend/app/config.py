@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     
     # Development
     auto_migrate_dev: bool = False  # Auto-run migrations in dev (set AUTO_MIGRATE_DEV=true)
+    
+    # JWT Authentication
+    jwt_secret_key: Optional[str] = None  # Will generate if not set
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30 * 24 * 60  # 30 days
 
 
 settings = Settings()

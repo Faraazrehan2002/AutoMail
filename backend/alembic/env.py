@@ -12,7 +12,7 @@ sys.path.insert(0, backend_dir)
 # Import your models and config
 from app.db import Base
 from app.config import settings
-from app.models import Job, Recipient, SendLog  # Import all models
+from app.models import User, Job, Recipient, SendLog, Batch, Template  # Import all models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

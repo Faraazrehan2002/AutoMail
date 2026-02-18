@@ -40,13 +40,17 @@ class JobDetailResponse(JobResponse):
 
 class SendRequest(BaseModel):
     subject: str = Field(..., min_length=1, description="Email subject")
-    html_body: str = Field(..., min_length=1, description="Email HTML body")
+    body: str = Field(..., min_length=1, description="Email body (plain text, will be converted to HTML)")
     recipients: List[EmailStr] = Field(..., min_items=1, description="List of recipient email addresses")
     personalization: Optional[dict] = Field(
         None,
         description="Optional personalization data keyed by email address"
     )
     dry_run: bool = Field(False, description="If true, validate but don't send emails")
+    attachments: Optional[List[str]] = Field(
+        None,
+        description="List of file paths/URLs for attachments (resume, cover letter, etc.)"
+    )
     
     @field_validator('recipients')
     @classmethod
@@ -84,6 +88,42 @@ class BatchStatus(BaseModel):
     failed: int
     created_at: datetime
     results: List[SendStatus]
+
+
+class BatchProgressResponse(BaseModel):
+    batch_id: str
+    job_id: str
+    status: str  # queued, processing, completed, failed
+    total: int
+    sent: int
+    failed: int
+    remaining: int
+    percent_complete: float
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class BatchListItem(BaseModel):
+    id: str
+    job_id: str
+    status: str
+    total: int
+    sent: int
+    failed: int
+    subject: str
+    dry_run: bool
+    scheduled_for: Optional[datetime] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class BatchListResponse(BaseModel):
+    batches: List[BatchListItem]
+    total: int
 
 
 class HealthResponse(BaseModel):

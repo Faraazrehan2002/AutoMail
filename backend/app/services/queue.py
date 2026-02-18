@@ -18,7 +18,8 @@ def get_redis_connection():
     global redis_conn
     if redis_conn is None:
         try:
-            redis_conn = Redis.from_url(settings.redis_url, decode_responses=True)
+            # Don't use decode_responses=True - RQ needs binary data
+            redis_conn = Redis.from_url(settings.redis_url, decode_responses=False)
             # Test connection
             redis_conn.ping()
             logger.info(f"Connected to Redis at {settings.redis_url}")

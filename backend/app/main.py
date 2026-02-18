@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from .db import init_db
-from .routers import jobs, health
+from .routers import jobs, health, auth, websocket, templates, scheduling, analytics, attachments
 from .config import settings
 from .middleware import APIKeyMiddleware
 
@@ -62,8 +62,14 @@ async def startup_event():
 
 
 # Include routers
+app.include_router(auth.router)
+app.include_router(attachments.router)
 app.include_router(jobs.router, tags=["jobs"])
 app.include_router(health.router, tags=["health"])
+app.include_router(websocket.router, tags=["websocket"])
+app.include_router(templates.router)
+app.include_router(scheduling.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

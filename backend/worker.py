@@ -17,7 +17,11 @@ import logging
 # Add backend to path
 sys.path.insert(0, os.path.dirname(__file__))
 
+# Fix for macOS: Use threading instead of forking to avoid objc issues
+os.environ['OBJC_DISABLE_INITIALIZE_FORK_SAFETY'] = 'YES'
+
 from rq import Worker, Queue, Connection
+from rq.worker import SimpleWorker
 from app.services.queue import get_redis_connection
 
 # Configure logging
@@ -37,7 +41,9 @@ if __name__ == '__main__':
         logger.info(f"Connected to Redis: {redis_conn.connection_pool.connection_kwargs}")
         
         with Connection(redis_conn):
-            worker = Worker([queue])
+            # Use SimpleWorker on macOS to avoid forking issues
+            # SimpleWorker uses threading instead of forking
+            worker = SimpleWorker([queue], connection=redis_conn)
             worker.work()
     except KeyboardInterrupt:
         logger.info("Worker stopped by user")
