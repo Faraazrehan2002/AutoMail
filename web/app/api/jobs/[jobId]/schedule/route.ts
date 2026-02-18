@@ -7,26 +7,22 @@ export async function POST(
 ) {
   try {
     const body = await request.json()
-
-    const backendResponse = await fetch(
-      `${BACKEND_URL}/jobs/${params.jobId}/send`,
-      {
-        method: 'POST',
+    const response = await fetch(`${BACKEND_URL}/jobs/${params.jobId}/schedule`, {
+      method: 'POST',
       headers: getBackendHeaders(),
-        body: JSON.stringify(body),
-      }
-    )
+      body: JSON.stringify(body),
+    })
 
-    const data = await backendResponse.json()
-
-    if (!backendResponse.ok) {
-      return NextResponse.json(data, { status: backendResponse.status })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to schedule' }))
+      return NextResponse.json(error, { status: response.status })
     }
 
+    const data = await response.json()
     return NextResponse.json(data)
   } catch (error: any) {
     return NextResponse.json(
-      { detail: error.message || 'Failed to send emails' },
+      { detail: error.message || 'Failed to schedule' },
       { status: 500 }
     )
   }

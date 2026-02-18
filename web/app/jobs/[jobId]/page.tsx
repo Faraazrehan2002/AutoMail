@@ -3,8 +3,22 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Search, Filter, CheckCircle2, XCircle, Clock, ArrowLeft, RefreshCw, Loader2 } from 'lucide-react'
-import { getJob, sendEmails, getBatchStatus, type JobDetail, type SendResponse, type BatchStatus } from '@/src/lib/api'
+import { Search, Filter, CheckCircle2, XCircle, Clock, ArrowLeft, RefreshCw, Loader2, Calendar, FileText, Send } from 'lucide-react'
+import { getJob, sendEmails, getBatchStatus, type JobDetail, type SendResponse, type BatchStatus, scheduleSend, type ScheduleRequest, listTemplates, type Template, uploadMultipleAttachments } from '@/src/lib/api'
+import { useBatchProgress } from '@/src/hooks/useBatchProgress'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,19 +43,103 @@ export default function JobDetailPage() {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [dryRun, setDryRun] = useState(false)
+  const [attachments, setAttachments] = useState<File[]>([])
+  const [attachmentPaths, setAttachmentPaths] = useState<string[]>([])
+  const [uploadingAttachments, setUploadingAttachments] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendResult, setSendResult] = useState<SendResponse | null>(null)
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [scheduledFor, setScheduledFor] = useState('')
+  const [showSchedule, setShowSchedule] = useState(false)
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('')
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+  
+  // Use WebSocket hook for real-time progress
+  const { progress, connected } = useBatchProgress(jobId, sendResult?.batch_id || null, !!sendResult?.batch_id)
+  
+  // Update batch status when WebSocket progress updates
+  useEffect(() => {
+    if (progress) {
+      setBatchStatus({
+        batch_id: progress.batch_id,
+        job_id: progress.job_id,
+        total_recipients: progress.total,
+        queued: progress.remaining,
+        sent: progress.sent,
+        failed: progress.failed,
+        created_at: progress.started_at || new Date().toISOString(),
+        results: [], // Will be populated from full batch status
+      })
+    }
+  }, [progress])
 
   useEffect(() => {
     loadJob()
+    loadTemplates()
   }, [jobId])
+  
+  async function loadTemplates() {
+    try {
+      setLoadingTemplates(true)
+      const data = await listTemplates()
+      setTemplates(data)
+    } catch (error) {
+      console.error('Failed to load templates:', error)
+    } finally {
+      setLoadingTemplates(false)
+    }
+  }
+  
+  function handleTemplateSelect(templateId: string) {
+    const template = templates.find(t => t.id === templateId)
+    if (template) {
+      setSelectedTemplate(templateId)
+      setSubject(template.subject)
+      // Convert HTML to plain text (remove tags, convert <br> to newlines)
+      const plainText = template.html_body
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .trim()
+      setBody(plainText)
+    }
+  }
 
   useEffect(() => {
     if (sendResult?.batch_id) {
       loadBatchStatus()
+      
+      // Auto-refresh every 2 seconds
+      const interval = setInterval(async () => {
+        const batchId = sendResult?.batch_id
+        if (!batchId) {
+          clearInterval(interval)
+          return
+        }
+        try {
+          const status = await getBatchStatus(jobId, batchId)
+          setBatchStatus(status)
+          // Stop auto-refresh if batch is complete (all sent or failed, none queued)
+          const isComplete = status.queued === 0 && (status.sent + status.failed === status.total_recipients)
+          if (isComplete) {
+            clearInterval(interval)
+          }
+        } catch (error) {
+          // Silently fail for auto-refresh
+          console.error('Auto-refresh error:', error)
+        }
+      }, 2000)
+      
+      return () => clearInterval(interval)
     }
-  }, [sendResult?.batch_id])
+  }, [sendResult?.batch_id, jobId])
 
   async function loadJob() {
     try {
@@ -61,13 +159,32 @@ export default function JobDetailPage() {
     }
   }
 
-  async function loadBatchStatus() {
-    if (!sendResult?.batch_id) return
+  async function loadBatchStatus(showToast = false) {
+    const batchId = sendResult?.batch_id
+    if (!batchId) return
+    
+    setRefreshing(true)
     try {
-      const status = await getBatchStatus(jobId, sendResult.batch_id)
+      const status = await getBatchStatus(jobId, batchId)
       setBatchStatus(status)
+      
+      if (showToast) {
+        toast({
+          title: "Status Updated",
+          description: `Sent: ${status.sent}, Failed: ${status.failed}, Queued: ${status.queued}`,
+        })
+      }
     } catch (error: any) {
       console.error('Failed to load batch status:', error)
+      if (showToast) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to load batch status",
+          variant: "destructive",
+        })
+      }
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -137,14 +254,15 @@ export default function JobDetailPage() {
       setSending(true)
       const result = await sendEmails(jobId, {
         subject,
-        html_body: body,
+        body: body,
         recipients: Array.from(selectedRecipients),
         dry_run: dryRun,
+        attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined,
       })
       setSendResult(result)
       toast({
         title: "Success",
-        description: dryRun ? "Dry run completed successfully" : "Emails sent successfully",
+        description: dryRun ? "Dry run queued successfully" : "Emails queued successfully",
       })
       setTimeout(() => loadBatchStatus(), 1000)
     } catch (error: any) {
@@ -152,6 +270,62 @@ export default function JobDetailPage() {
       toast({
         title: "Error",
         description: error.message || 'Failed to send emails',
+        variant: "destructive",
+      })
+    } finally {
+      setSending(false)
+    }
+  }
+  
+  async function handleSchedule() {
+    if (!subject.trim() || !body.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter subject and body",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (selectedRecipients.size === 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please select at least one recipient",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!scheduledFor) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a date and time",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setSending(true)
+      const result = await scheduleSend(jobId, {
+        subject,
+        body: body,
+        recipients: Array.from(selectedRecipients),
+        dry_run: dryRun,
+        scheduled_for: scheduledFor,
+        attachments: attachmentPaths.length > 0 ? attachmentPaths : undefined,
+      })
+      toast({
+        title: "Success",
+        description: `Emails scheduled for ${new Date(scheduledFor).toLocaleString()}`,
+      })
+      setShowSchedule(false)
+      setScheduledFor('')
+    } catch (error: any) {
+      console.error('Failed to schedule:', error)
+      toast({
+        title: "Error",
+        description: error.message || 'Failed to schedule emails',
         variant: "destructive",
       })
     } finally {
@@ -193,9 +367,9 @@ export default function JobDetailPage() {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
       >
-        <div>
+        <div className="flex-1 min-w-0">
           <motion.div whileHover={{ x: -4 }}>
             <Button
               variant="ghost"
@@ -206,10 +380,10 @@ export default function JobDetailPage() {
               Back to Dashboard
             </Button>
           </motion.div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
             {job.filename}
           </h1>
-          <p className="text-muted-foreground mt-2">
+          <p className="text-sm sm:text-base text-muted-foreground mt-2 break-words">
             {job.recipient_count} recipients • Created {new Date(job.created_at).toLocaleString()}
           </p>
         </div>
@@ -279,11 +453,11 @@ export default function JobDetailPage() {
               </div>
 
               {/* Recipients Table */}
-              <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+              <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto overflow-x-auto">
                 <table className="min-w-full divide-y divide-border">
                   <thead className="bg-muted/50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase w-12">
+                      <th className="px-2 sm:px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase w-12">
                         <input
                           type="checkbox"
                           checked={filteredRecipients.length > 0 && filteredRecipients.every((r) => selectedRecipients.has(r.email))}
@@ -297,9 +471,9 @@ export default function JobDetailPage() {
                           className="rounded border-gray-300"
                         />
                       </th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Email</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Name</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Company</th>
+                      <th className="px-2 sm:px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Email</th>
+                      <th className="px-2 sm:px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase hidden sm:table-cell">Name</th>
+                      <th className="px-2 sm:px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase hidden md:table-cell">Company</th>
                     </tr>
                   </thead>
                   <tbody className="bg-background divide-y divide-border">
@@ -308,7 +482,7 @@ export default function JobDetailPage() {
                         key={recipient.email}
                         className={`hover:bg-muted/50 transition-colors ${selectedRecipients.has(recipient.email) ? 'bg-primary/10' : ''}`}
                       >
-                        <td className="px-4 py-2">
+                        <td className="px-2 sm:px-4 py-2">
                           <input
                             type="checkbox"
                             checked={selectedRecipients.has(recipient.email)}
@@ -316,9 +490,9 @@ export default function JobDetailPage() {
                             className="rounded border-gray-300"
                           />
                         </td>
-                        <td className="px-4 py-2 text-sm">{recipient.email}</td>
-                        <td className="px-4 py-2 text-sm text-muted-foreground">{recipient.name || '-'}</td>
-                        <td className="px-4 py-2 text-sm text-muted-foreground">{recipient.company || '-'}</td>
+                        <td className="px-2 sm:px-4 py-2 text-sm break-words">{recipient.email}</td>
+                        <td className="px-2 sm:px-4 py-2 text-sm text-muted-foreground hidden sm:table-cell">{recipient.name || '-'}</td>
+                        <td className="px-2 sm:px-4 py-2 text-sm text-muted-foreground hidden md:table-cell">{recipient.company || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -357,14 +531,93 @@ export default function JobDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2">Body (HTML)</label>
+                  <label className="block text-sm font-medium mb-2">Message Body</label>
                   <Textarea
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
-                    placeholder="<p>Your email body here...</p>"
-                    rows={8}
-                    className="font-mono text-sm"
+                    placeholder="Type your email message here. Line breaks will be preserved."
+                    rows={10}
+                    className="text-sm"
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Plain text message. Line breaks will be converted to HTML automatically.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Attachments (Resume, Cover Letter, etc.)</label>
+                  <Input
+                    type="file"
+                    multiple
+                    accept=".pdf,.doc,.docx"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || [])
+                      if (files.length === 0) return
+                      
+                      setAttachments(files)
+                      setUploadingAttachments(true)
+                      
+                      try {
+                        // Upload files to server
+                        const uploadResults = await uploadMultipleAttachments(files)
+                        const paths = uploadResults.map(r => r.file_path)
+                        setAttachmentPaths(paths)
+                        toast({
+                          title: "Success",
+                          description: `Uploaded ${uploadResults.length} attachment(s)`,
+                        })
+                      } catch (error: any) {
+                        console.error('Failed to upload attachments:', error)
+                        toast({
+                          title: "Upload Error",
+                          description: error.message || 'Failed to upload attachments',
+                          variant: "destructive",
+                        })
+                        setAttachments([])
+                        setAttachmentPaths([])
+                      } finally {
+                        setUploadingAttachments(false)
+                      }
+                    }}
+                    className="cursor-pointer"
+                    disabled={uploadingAttachments}
+                  />
+                  {uploadingAttachments && (
+                    <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Uploading attachments...</span>
+                    </div>
+                  )}
+                  {attachments.length > 0 && !uploadingAttachments && (
+                    <div className="mt-2 space-y-1">
+                      {attachments.map((file, idx) => (
+                        <div key={idx} className="text-sm text-muted-foreground flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          <span>{file.name}</span>
+                          <span className="text-xs">({(file.size / 1024).toFixed(1)} KB)</span>
+                          {attachmentPaths[idx] && (
+                            <Badge variant="outline" className="text-xs">Uploaded</Badge>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 ml-auto"
+                            onClick={() => {
+                              const newAttachments = attachments.filter((_, i) => i !== idx)
+                              const newPaths = attachmentPaths.filter((_, i) => i !== idx)
+                              setAttachments(newAttachments)
+                              setAttachmentPaths(newPaths)
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Upload PDF, DOC, or DOCX files to attach to your emails. Files are uploaded immediately when selected.
+                  </p>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Switch
@@ -407,10 +660,9 @@ export default function JobDetailPage() {
                 <CardContent>
                   <div className="border rounded-lg p-4 bg-muted/30">
                     <div className="text-sm font-medium mb-2">Subject: {subject || '(no subject)'}</div>
-                    <div
-                      className="prose max-w-none dark:prose-invert"
-                      dangerouslySetInnerHTML={{ __html: body }}
-                    />
+                    <div className="prose max-w-none dark:prose-invert whitespace-pre-wrap">
+                      {body}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -425,16 +677,26 @@ export default function JobDetailPage() {
             >
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Send Results</CardTitle>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <CardTitle>Send Results</CardTitle>
+                      {connected && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse" />
+                          Real-time updates active
+                        </p>
+                      )}
+                    </div>
                     {sendResult?.batch_id && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={loadBatchStatus}
+                        onClick={() => loadBatchStatus(true)}
+                        disabled={refreshing}
+                        className="w-full sm:w-auto"
                       >
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                        Refresh
+                        <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                        {refreshing ? 'Refreshing...' : 'Refresh'}
                       </Button>
                     )}
                   </div>
@@ -445,14 +707,32 @@ export default function JobDetailPage() {
                       <div className="text-sm">
                         <span className="font-medium">Batch ID:</span> {sendResult.batch_id}
                       </div>
+                      {progress && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span>Progress</span>
+                            <span className="font-medium">{progress.percent_complete.toFixed(1)}%</span>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-2">
+                            <div
+                              className="bg-primary h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${progress.percent_complete}%` }}
+                            />
+                          </div>
+                          <div className="flex gap-4 text-xs">
+                            <span>Status: <Badge variant="secondary">{progress.status}</Badge></span>
+                            <span>Remaining: {progress.remaining}</span>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex gap-4">
                         <Badge variant="success" className="gap-1">
                           <CheckCircle2 className="h-3 w-3" />
-                          {sendResult.sent} sent
+                          {progress?.sent || sendResult.sent || 0} sent
                         </Badge>
                         <Badge variant="destructive" className="gap-1">
                           <XCircle className="h-3 w-3" />
-                          {sendResult.failed} failed
+                          {progress?.failed || sendResult.failed || 0} failed
                         </Badge>
                         {sendResult.dry_run && (
                           <Badge variant="secondary" className="gap-1">
@@ -467,7 +747,7 @@ export default function JobDetailPage() {
                     <div className="space-y-4">
                       <PieChartWrapper data={chartData} height={192} />
                       <div className="text-sm text-muted-foreground mb-2">Per-recipient status:</div>
-                      <div className="max-h-64 overflow-y-auto border rounded-lg">
+                      <div className="max-h-64 overflow-y-auto overflow-x-auto border rounded-lg">
                         <table className="min-w-full divide-y divide-border">
                           <thead className="bg-muted/50">
                             <tr>

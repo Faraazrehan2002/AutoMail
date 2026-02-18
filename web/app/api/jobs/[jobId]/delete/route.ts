@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_API_BASE_URL || 'http://localhost:8000'
-const APP_API_KEY = process.env.APP_API_KEY || ''
+import { getBackendHeaders, BACKEND_URL } from '../../_helpers'
 
 export async function POST(
   request: NextRequest,
@@ -15,9 +13,7 @@ export async function POST(
 
     const response = await fetch(`${BACKEND_URL}/jobs/${jobId}`, {
       method: 'DELETE',
-      headers: {
-        'X-APP-KEY': APP_API_KEY,
-      },
+      headers: getBackendHeaders(),
     })
 
     console.log('Backend response status:', response.status)

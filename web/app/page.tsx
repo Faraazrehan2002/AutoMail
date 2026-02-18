@@ -226,7 +226,7 @@ export default function Dashboard() {
       >
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <CardTitle>Recent Jobs</CardTitle>
                 <CardDescription>
@@ -302,16 +302,16 @@ export default function Dashboard() {
                     <table className="min-w-full divide-y divide-border/40">
                       <thead className="bg-muted/30 backdrop-blur-sm sticky top-0">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             Filename
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             Recipients
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">
                             Created
                           </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                             Actions
                           </th>
                         </tr>
@@ -330,19 +330,19 @@ export default function Dashboard() {
                           >
                             {/* Shimmer effect on hover */}
                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 animate-shimmer" />
-                            <td className="px-6 py-4 whitespace-nowrap relative z-10">
+                            <td className="px-3 sm:px-6 py-4 relative z-10">
                               <div className="flex items-center gap-2">
-                                <FileText className="h-4 w-4 text-primary" />
-                                <span className="text-sm font-medium">{job.filename}</span>
+                                <FileText className="h-4 w-4 text-primary flex-shrink-0" />
+                                <span className="text-sm font-medium break-words">{job.filename}</span>
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground relative z-10">
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-muted-foreground relative z-10">
                               {job.recipient_count}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground relative z-10">
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm text-muted-foreground relative z-10 hidden md:table-cell">
                               {new Date(job.created_at).toLocaleString()}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium relative z-10">
+                            <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-sm font-medium relative z-10">
                               <div className="flex items-center gap-2">
                                 <Button
                                   variant="ghost"

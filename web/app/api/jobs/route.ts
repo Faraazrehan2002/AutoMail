@@ -1,32 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const BACKEND_URL = process.env.BACKEND_API_BASE_URL || 'http://localhost:8000'
-const API_KEY = process.env.APP_API_KEY
+import { getBackendHeaders, BACKEND_URL } from '../_helpers'
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams
+    const { searchParams } = new URL(request.url)
     const page = searchParams.get('page') || '1'
     const pageSize = searchParams.get('page_size') || '20'
 
-    const backendResponse = await fetch(
+    const response = await fetch(
       `${BACKEND_URL}/jobs?page=${page}&page_size=${pageSize}`,
       {
-        method: 'GET',
-        headers: API_KEY ? { 'X-APP-KEY': API_KEY } : {},
+        headers: getBackendHeaders(),
       }
     )
 
-    const data = await backendResponse.json()
-
-    if (!backendResponse.ok) {
-      return NextResponse.json(data, { status: backendResponse.status })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to fetch jobs' }))
+      return NextResponse.json(error, { status: response.status })
     }
 
+    const data = await response.json()
     return NextResponse.json(data)
   } catch (error: any) {
     return NextResponse.json(
       { detail: error.message || 'Failed to fetch jobs' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const response = await fetch(`${BACKEND_URL}/jobs`, {
+      method: 'DELETE',
+      headers: getBackendHeaders(),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to delete all jobs' }))
+      return NextResponse.json(error, { status: response.status })
+    }
+
+    return new NextResponse(null, { status: 204 })
+  } catch (error: any) {
+    return NextResponse.json(
+      { detail: error.message || 'Failed to delete all jobs' },
       { status: 500 }
     )
   }

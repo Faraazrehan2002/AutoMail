@@ -2,13 +2,15 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Menu, X } from "lucide-react"
+import { LayoutDashboard, Menu, X, FileText, BarChart3 } from "lucide-react"
 import { Button } from "./ui/button"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/templates", label: "Templates", icon: FileText },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ]
 
 export function Sidebar() {

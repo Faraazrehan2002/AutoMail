@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   redis:
     image: redis:7-alpine
@@ -11,6 +13,96 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - automail-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: automail
+      POSTGRES_PASSWORD: automail_dev
+      POSTGRES_DB: automail
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automail"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - automail-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://automail:automail_dev@postgres:5432/automail
+      - REDIS_URL=redis://redis:6379/0
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
+      - APP_API_KEY=${APP_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-changeme_in_production}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
+    volumes:
+      - ./backend:/app
+      - ./backend/storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - automail-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://automail:automail_dev@postgres:5432/automail
+      - REDIS_URL=redis://redis:6379/0
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - FROM_EMAIL=${FROM_EMAIL}
+      - OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python worker.py
+    networks:
+      - automail-network
+
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://automail:automail_dev@postgres:5432/automail
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python scheduler.py
+    networks:
+      - automail-network
 
 volumes:
   redis_data:
+  postgres_data:
+
+networks:
+  automail-network:
+    driver: bridge

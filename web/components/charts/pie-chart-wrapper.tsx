@@ -1,7 +1,5 @@
 "use client"
 
-import { useState, useEffect } from "react"
-
 const COLORS = ['#10b981', '#ef4444', '#f59e0b']
 
 interface PieChartData {
@@ -16,57 +14,6 @@ interface PieChartWrapperProps {
 }
 
 export function PieChartWrapper({ data, height = 200 }: PieChartWrapperProps) {
-  const [ChartComponent, setChartComponent] = useState<React.ComponentType<{ data: PieChartData[], height: number }> | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    // Only load on client side, after mount
-    if (typeof window === "undefined") return
-
-    const loadChart = async () => {
-      try {
-        // Use dynamic import to avoid build-time analysis
-        const recharts = await import("recharts")
-        const { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } = recharts
-        
-        const Chart = ({ data, height }: { data: PieChartData[], height: number }) => {
-          return (
-            <div style={{ height: `${height}px` }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )
-        }
-        
-        setChartComponent(() => Chart)
-      } catch (error) {
-        console.warn("Failed to load recharts:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadChart()
-  }, [])
-
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-muted-foreground">
@@ -77,37 +24,94 @@ export function PieChartWrapper({ data, height = 200 }: PieChartWrapperProps) {
     )
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48 text-muted-foreground">
-        <div className="text-sm">Loading chart...</div>
-      </div>
-    )
-  }
+  // Calculate total for percentages
+  const total = data.reduce((sum, item) => sum + item.value, 0)
+  
+  // Calculate angles for the pie chart
+  let currentAngle = 0
+  const segments = data.map((item, index) => {
+    const percentage = (item.value / total) * 100
+    const angle = (item.value / total) * 360
+    const startAngle = currentAngle
+    currentAngle += angle
+    
+    return {
+      ...item,
+      percentage,
+      angle,
+      startAngle,
+      color: item.color || COLORS[index % COLORS.length],
+    }
+  })
 
-  if (!ChartComponent) {
-    // Fallback: show data as text
-    return (
-      <div className="flex items-center justify-center h-48 text-muted-foreground">
-        <div className="text-center">
-          <div className="text-sm mb-2">Chart data:</div>
-          <div className="text-xs space-y-1">
-            {data.map((item, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: item.color || COLORS[i % COLORS.length] }}
-                />
-                <span>
-                  {item.name}: {item.value}
-                </span>
-              </div>
-            ))}
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ height: `${height}px` }}>
+      {/* CSS-based pie chart */}
+      <div className="relative w-48 h-48 mb-4">
+        <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+          {segments.map((segment, index) => {
+            const { startAngle, angle, color } = segment
+            const endAngle = startAngle + angle
+            
+            // Calculate path for pie slice
+            const startAngleRad = (startAngle * Math.PI) / 180
+            const endAngleRad = (endAngle * Math.PI) / 180
+            const largeArcFlag = angle > 180 ? 1 : 0
+            
+            const x1 = 50 + 50 * Math.cos(startAngleRad)
+            const y1 = 50 + 50 * Math.sin(startAngleRad)
+            const x2 = 50 + 50 * Math.cos(endAngleRad)
+            const y2 = 50 + 50 * Math.sin(endAngleRad)
+            
+            const pathData = [
+              `M 50 50`,
+              `L ${x1} ${y1}`,
+              `A 50 50 0 ${largeArcFlag} 1 ${x2} ${y2}`,
+              `Z`,
+            ].join(' ')
+            
+            return (
+              <path
+                key={index}
+                d={pathData}
+                fill={color}
+                stroke="white"
+                strokeWidth="0.5"
+                className="transition-opacity hover:opacity-80"
+              />
+            )
+          })}
+        </svg>
+        
+        {/* Center text with total */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-lg font-bold text-foreground">{total}</div>
+            <div className="text-xs text-muted-foreground">Total</div>
           </div>
         </div>
       </div>
-    )
-  }
-
-  return <ChartComponent data={data} height={height} />
+      
+      {/* Legend */}
+      <div className="w-full space-y-2">
+        {segments.map((segment, index) => (
+          <div key={index} className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: segment.color }}
+              />
+              <span className="text-foreground">{segment.name}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">{segment.value}</span>
+              <span className="text-muted-foreground w-12 text-right">
+                ({segment.percentage.toFixed(1)}%)
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

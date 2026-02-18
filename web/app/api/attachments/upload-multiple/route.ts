@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getBackendHeaders, BACKEND_URL } from '../_helpers'
+import { getBackendHeaders, BACKEND_URL } from '../../_helpers'
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     
     // Forward to backend with multipart/form-data
-    // Note: Don't set Content-Type header - fetch will set it with boundary
-    // For file uploads, we need to exclude Content-Type header to let browser set boundary
     const headers = getBackendHeaders()
     delete headers['Content-Type'] // Remove Content-Type for FormData
     
-    const backendResponse = await fetch(`${BACKEND_URL}/upload`, {
+    const backendResponse = await fetch(`${BACKEND_URL}/attachments/upload-multiple`, {
       method: 'POST',
       headers,
-      body: formData, // FormData automatically sets Content-Type with boundary
+      body: formData,
     })
 
     const data = await backendResponse.json()
