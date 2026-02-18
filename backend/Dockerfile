@@ -17,6 +17,9 @@ COPY . .
 # Create storage directory
 RUN mkdir -p storage
 
+# Run migrations (will be skipped if using external DB)
+RUN alembic upgrade head || true
+
 # Expose port
 EXPOSE 8000
 
