@@ -18,13 +18,21 @@ def get_redis_connection():
     global redis_conn
     if redis_conn is None:
         try:
+            # Validate Redis URL
+            redis_url = settings.redis_url
+            if not redis_url:
+                raise ValueError("REDIS_URL environment variable is not set")
+            if not redis_url.startswith(('redis://', 'rediss://', 'unix://')):
+                raise ValueError(f"Invalid Redis URL format. Must start with redis://, rediss://, or unix://. Got: {redis_url[:20]}...")
+            
             # Don't use decode_responses=True - RQ needs binary data
-            redis_conn = Redis.from_url(settings.redis_url, decode_responses=False)
+            redis_conn = Redis.from_url(redis_url, decode_responses=False)
             # Test connection
             redis_conn.ping()
-            logger.info(f"Connected to Redis at {settings.redis_url}")
+            logger.info(f"Connected to Redis successfully")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
+            logger.error(f"REDIS_URL value: {settings.redis_url[:50] if settings.redis_url else 'NOT SET'}...")
             raise
     return redis_conn
 
