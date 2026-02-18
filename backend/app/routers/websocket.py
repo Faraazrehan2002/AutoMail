@@ -3,7 +3,7 @@ WebSocket endpoints for real-time progress updates
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from sqlalchemy.orm import Session
-from ..db import get_db
+from ..db import get_db, SessionLocal
 from ..models import Batch, Job
 from ..services.websocket_manager import manager
 import logging
