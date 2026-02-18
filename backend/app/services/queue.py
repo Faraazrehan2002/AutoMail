@@ -25,11 +25,23 @@ def get_redis_connection():
             if not redis_url.startswith(('redis://', 'rediss://', 'unix://')):
                 raise ValueError(f"Invalid Redis URL format. Must start with redis://, rediss://, or unix://. Got: {redis_url[:20]}...")
             
+            # For Upstash and some cloud Redis providers, try rediss:// (TLS) if redis:// fails
             # Don't use decode_responses=True - RQ needs binary data
-            redis_conn = Redis.from_url(redis_url, decode_responses=False)
-            # Test connection
-            redis_conn.ping()
-            logger.info(f"Connected to Redis successfully")
+            try:
+                redis_conn = Redis.from_url(redis_url, decode_responses=False, socket_connect_timeout=5, socket_timeout=5)
+                # Test connection
+                redis_conn.ping()
+                logger.info(f"Connected to Redis successfully")
+            except Exception as first_error:
+                # If connection fails and URL uses redis://, try rediss:// (TLS)
+                if redis_url.startswith('redis://') and 'rediss://' not in redis_url:
+                    logger.info("Trying TLS connection (rediss://)...")
+                    tls_url = redis_url.replace('redis://', 'rediss://', 1)
+                    redis_conn = Redis.from_url(tls_url, decode_responses=False, socket_connect_timeout=5, socket_timeout=5)
+                    redis_conn.ping()
+                    logger.info(f"Connected to Redis with TLS successfully")
+                else:
+                    raise first_error
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             logger.error(f"REDIS_URL value: {settings.redis_url[:50] if settings.redis_url else 'NOT SET'}...")
